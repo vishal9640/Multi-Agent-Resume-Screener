@@ -5,6 +5,8 @@ Built for **personal job search use**, but designed with **real-world engineerin
 
 This is **not a toy project**. It is intended to demonstrate **system design, agentic AI, and responsible LLM usage** at an interview-ready level.
 
+Why this is a multi-agent system
+This project uses a multi-agent design where multiple role-specialized LLM agents perform distinct tasks within a single orchestrated workflow. Each agent has a clearly defined responsibility—resume extraction, rubric-based scoring with citations, gap analysis with improvement recommendations, and interview question generation—and operates on a shared structured state managed by a LangGraph state machine. This separation of concerns improves explainability, evaluation, and stability compared to a single monolithic prompt, making the system production-oriented rather than a toy LLM demo.
 ---
 
 ## 🚀 What This Project Does
