@@ -49,6 +49,10 @@ if st.button("✅ Run Scoring", use_container_width=True):
             url = f"{API_BASE}/score/{run_id}"
             st.write("Calling:", url)
             r = requests.post(url, params={"mode": "fast"}, timeout=900)
+            
+            if st.button("Run Full (Gaps + Rewrites + Interview Qs)"):
+                r = requests.post(url, params={"mode": "full"}, timeout=900)
+
             if not r.ok:
                 st.error(f"Failed: {r.status_code}")
                 st.code(r.text)

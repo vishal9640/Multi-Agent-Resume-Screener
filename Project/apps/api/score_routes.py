@@ -15,7 +15,7 @@ def score_run(
     full: fast + gaps + rewrites + interview questions
     """
     try:
-        state = graph.invoke({"run_id": run_id, "mode": mode})
+        state = graph.invoke({"run_id": run_id, "mode": "fast"})
         return state["final_output"]  # we'll set this in the graph
     except Exception:
         print("❌ /score crashed:")
