@@ -10,6 +10,7 @@ from Core.llm.ollama_llm import ollama_chat
 from Core.scoring.quote_utils import quote_20_words
 from apps.api.schemas_phase4 import ScoreOutput
 
+
 class ScoreState(TypedDict, total=False):
     run_id: str
     mode: str
@@ -24,54 +25,26 @@ class ScoreState(TypedDict, total=False):
     interview_questions: List[Dict[str, Any]]
     final_output: Dict[str, Any]
 
-def node_finalize(state: ScoreState) -> ScoreState:
-    out = {
-        "run_id": state["run_id"],
-        "overall_score": state["overall_score"],
-        "decision": state["decision"],
-        "hard_reject": state.get("hard_reject", False),
-        "hard_flags": state.get("hard_flags", []),
-        "dimension_scores": [
-            {
-                "dimension": r["dimension"],
-                "score": r["score"],
-                "weight": r["weight"],
-                "rationale": r.get("rationale",""),
-                "jd_citations": [{"source":"JD", **c} for c in r.get("jd_citations", [])],
-                "resume_citations": [{"source":"RESUME", **c} for c in r.get("resume_citations", [])],
-            } for r in state.get("dimension_results", [])
-        ],
-        "gaps": state.get("gaps", []),
-        "rewrites": state.get("rewrites", []),
-        "interview_questions": state.get("interview_questions", []),
-    }
-    state["final_output"] = out
-    return state 
+
+def _evidence_ctx(state: ScoreState) -> str:
+    return str(state["evidence"]["dimensions"])[:6000]
+
 
 def node_retrieve(state: ScoreState) -> ScoreState:
     state["evidence"] = retrieve_evidence(state["run_id"], top_k=5)
     return state
 
+
 def node_score_dimensions(state: ScoreState) -> ScoreState:
     results = []
-    dims = state["evidence"]["dimensions"]
-
-    # build maps for quick access
-    by_dim = {d["dimension"]: d for d in dims}
+    by_dim = {d["dimension"]: d for d in state["evidence"]["dimensions"]}
 
     for d in DIMENSIONS:
         dim_name = d["dimension"]
         ev = by_dim.get(dim_name, {})
-        jd_ev = ev.get("jd_evidence", [])
-        res_ev = ev.get("resume_evidence", [])
 
-        jd_text = "\n".join([f'{x["chunk_id"]}: {x["snippet"]}' for x in jd_ev])
-        res_text = "\n".join([f'{x["chunk_id"]}: {x["snippet"]}' for x in res_ev])
-        
-        def cap(s: str, n: int = 2500) -> str:
-            return s[:n]
-        jd_text = cap(jd_text, 2500)
-        res_text = cap(res_text, 2500)
+        jd_text = "\n".join([f'{x["chunk_id"]}: {x["snippet"]}' for x in ev.get("jd_evidence", [])])[:2500]
+        res_text = "\n".join([f'{x["chunk_id"]}: {x["snippet"]}' for x in ev.get("resume_evidence", [])])[:2500]
 
         prompt = SCORE_DIM_PROMPT.format(
             dimension=dim_name,
@@ -83,25 +56,19 @@ def node_score_dimensions(state: ScoreState) -> ScoreState:
 
         out = ollama_chat(prompt, system=SCORER_SYSTEM)
 
-        # enforce quote limit
         for c in out.get("jd_citations", []):
-            c["quote"] = quote_20_words(c.get("quote",""))
+            c["quote"] = quote_20_words(c.get("quote", ""))
         for c in out.get("resume_citations", []):
-            c["quote"] = quote_20_words(c.get("quote",""))
+            c["quote"] = quote_20_words(c.get("quote", ""))
 
-        results.append({
-            "dimension": dim_name,
-            "weight": d["weight"],
-            **out
-        })
+        results.append({"dimension": dim_name, "weight": d["weight"], **out})
 
     state["dimension_results"] = results
     return state
 
+
 def node_aggregate(state: ScoreState) -> ScoreState:
-    weighted = 0.0
-    for r in state["dimension_results"]:
-        weighted += (r["score"]/100.0) * r["weight"]
+    weighted = sum((r["score"] / 100.0) * r["weight"] for r in state["dimension_results"])
     overall = int(round(weighted * 100))
     state["overall_score"] = overall
 
@@ -115,30 +82,54 @@ def node_aggregate(state: ScoreState) -> ScoreState:
         state["decision"] = "no_match"
     return state
 
+
 def node_gaps(state: ScoreState) -> ScoreState:
-    # use evidence summary as context
-    dims = state["evidence"]["dimensions"]
-    ctx = str(dims)[:6000]
-    gaps = ollama_chat(GAP_PROMPT + "\n\nCONTEXT:\n" + ctx, system=SCORER_SYSTEM)
-    state["gaps"] = gaps
+    ctx = _evidence_ctx(state)
+    state["gaps"] = ollama_chat(GAP_PROMPT + "\n\nCONTEXT:\n" + ctx, system=SCORER_SYSTEM)
     return state
+
 
 def node_rewrites(state: ScoreState) -> ScoreState:
-    dims = state["evidence"]["dimensions"]
-    ctx = str(dims)[:6000]
-    rewrites = ollama_chat(REWRITE_PROMPT + "\n\nCONTEXT:\n" + ctx, system=SCORER_SYSTEM)
-    state["rewrites"] = rewrites
+    ctx = _evidence_ctx(state)
+    state["rewrites"] = ollama_chat(REWRITE_PROMPT + "\n\nCONTEXT:\n" + ctx, system=SCORER_SYSTEM)
     return state
 
+
 def node_interview_qs(state: ScoreState) -> ScoreState:
-    dims = state["evidence"]["dimensions"]
-    ctx = str(dims)[:6000]
-    qs = ollama_chat(INTERVIEW_Q_PROMPT + "\n\nCONTEXT:\n" + ctx, system=SCORER_SYSTEM)
-    state["interview_questions"] = qs
+    ctx = _evidence_ctx(state)
+    state["interview_questions"] = ollama_chat(INTERVIEW_Q_PROMPT + "\n\nCONTEXT:\n" + ctx, system=SCORER_SYSTEM)
     return state
+
+
+def node_finalize(state: ScoreState) -> ScoreState:
+    out = {
+        "run_id": state["run_id"],
+        "overall_score": state["overall_score"],
+        "decision": state["decision"],
+        "hard_reject": state.get("hard_reject", False),
+        "hard_flags": state.get("hard_flags", []),
+        "dimension_scores": [
+            {
+                "dimension": r["dimension"],
+                "score": r["score"],
+                "weight": r["weight"],
+                "rationale": r.get("rationale", ""),
+                "jd_citations": [{"source": "JD", **c} for c in r.get("jd_citations", [])],
+                "resume_citations": [{"source": "RESUME", **c} for c in r.get("resume_citations", [])],
+            }
+            for r in state.get("dimension_results", [])
+        ],
+        "gaps": state.get("gaps", []),
+        "rewrites": state.get("rewrites", []),
+        "interview_questions": state.get("interview_questions", []),
+    }
+    state["final_output"] = out
+    return state
+
 
 def route_after_aggregate(state: ScoreState) -> str:
     return "gaps" if state.get("mode", "fast") == "full" else "finalize"
+
 
 def build_graph():
     g = StateGraph(ScoreState)
@@ -149,23 +140,17 @@ def build_graph():
     g.add_node("rewrites", node_rewrites)
     g.add_node("interview", node_interview_qs)
     g.add_node("finalize", node_finalize)
-    
+
     g.set_entry_point("retrieve")
     g.add_edge("retrieve", "score_dims")
     g.add_edge("score_dims", "aggregate")
-
-    # conditional route:
     g.add_conditional_edges("aggregate", route_after_aggregate, {
         "gaps": "gaps",
-        "finalize": "finalize"
+        "finalize": "finalize",
     })
-
     g.add_edge("gaps", "rewrites")
     g.add_edge("rewrites", "interview")
     g.add_edge("interview", "finalize")
     g.add_edge("finalize", END)
 
-
     return g.compile()
-
-

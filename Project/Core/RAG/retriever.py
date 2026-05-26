@@ -36,7 +36,7 @@ def retrieve_evidence(run_id: str, top_k: int = 5) -> Dict:
     out = {"run_id": run_id, "top_k": top_k, "dimensions": []}
 
     for dim, q in DIMENSION_QUERIES.items():
-        q_emb = embed_texts([q])[0]
+        q_emb = _get_query_embedding(dim, q)
 
         jd_hits = query_chunks("jd_chunks", q_emb, run_id=run_id, top_k=top_k)
         res_hits = query_chunks("resume_chunks", q_emb, run_id=run_id, top_k=top_k)

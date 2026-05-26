@@ -1,3 +1,1 @@
-def quote_20_words(text: str) -> str:
-    words = (text or "").strip().split()
-    return " ".join(words[:20])
+from Core.parsing.provenance import quote_20_words  # noqa: F401
